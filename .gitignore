@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+
+# Skyfield ephemeris cache
+*.bsp
+*.dat
+
+# Generated results
+results/cartes/
+results/ombres_par_heure.csv
+results/rapport_ombres.html
+results/evolution_ensoleillement.png
