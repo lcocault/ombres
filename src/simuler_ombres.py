@@ -130,7 +130,7 @@ def get_sun_position(lat: float, lon: float, dt: datetime) -> tuple[float, float
         ts = load.timescale()
         t = ts.from_datetime(dt)
         eph = load("de421.bsp")
-        location = wgs84.latlon(lat * N, lon * E)
+        location = eph["earth"] + wgs84.latlon(lat * N, lon * E)
         astrometric = location.at(t).observe(eph["sun"]).apparent()
         alt, az, _ = astrometric.altaz()
         return az.degrees, alt.degrees
@@ -201,6 +201,10 @@ def compute_shadow_map(
 
 def shadow_to_image(shadow: np.ndarray, hour_label: str, output_path: str) -> None:
     """Génère une image PNG de la carte d'ombre."""
+    # PIL place la ligne 0 en haut, alors que generate_mns_image utilise
+    # origin="lower" (ligne 0 en bas) : on retourne verticalement pour
+    # rester cohérent avec l'orientation de la carte MNS.
+    shadow = np.flipud(shadow)
     rows, cols = shadow.shape
     # Soleil = jaune, ombre = bleu foncé
     rgb = np.where(shadow[:, :, np.newaxis], [30, 50, 120], [255, 220, 50]).astype(np.uint8)
@@ -212,6 +216,25 @@ def shadow_to_image(shadow: np.ndarray, hour_label: str, output_path: str) -> No
     draw = ImageDraw.Draw(img)
     draw.text((4, 4), hour_label, fill=(255, 255, 255))
     img.save(output_path)
+
+
+# ---------------------------------------------------------------------------
+# MNS visualization
+# ---------------------------------------------------------------------------
+
+def generate_mns_image(grid: np.ndarray, resolution: float, output_path: str) -> None:
+    """Génère une représentation en carte de hauteur (heatmap) du MNS."""
+    rows, cols = grid.shape
+    fig, ax = plt.subplots(figsize=(6, 5))
+    extent = (0, cols * resolution, 0, rows * resolution)
+    im = ax.imshow(grid, cmap="terrain", origin="lower", extent=extent)
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
+    ax.set_title("Modèle numérique de surface (MNS)")
+    fig.colorbar(im, ax=ax, label="Altitude (m)")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=100)
+    plt.close(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +301,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <h1>🌿 Rapport des zones d'ombre — {{ date }}</h1>
   <p><strong>Coordonnées :</strong> {{ latitude }}°N, {{ longitude }}°E</p>
 
+  <h2>🏔️ Modèle numérique de surface</h2>
+  <div class="chart"><img src="{{ mns_path }}" alt="Carte du MNS"></div>
+
   <h2>📊 Évolution de l'ensoleillement</h2>
   <div class="chart"><img src="{{ chart_path }}" alt="Graphique ensoleillement"></div>
 
@@ -303,6 +329,7 @@ def generate_html_report(
     longitude: float,
     hours_data: list[tuple[int, str, str]],
     chart_path: str,
+    mns_path: str,
 ) -> str:
     env = Environment(loader=FileSystemLoader("/"), autoescape=select_autoescape(["html"]))
     template = env.from_string(HTML_TEMPLATE)
@@ -312,6 +339,7 @@ def generate_html_report(
         longitude=longitude,
         hours_data=hours_data,
         chart_path=chart_path,
+        mns_path=mns_path,
     )
     report_path = os.path.join(output_dir, "rapport_ombres.html")
     with open(report_path, "w", encoding="utf-8") as fh:
@@ -372,6 +400,11 @@ def main(argv=None):
     grid, x_min, y_min, dx, dy = load_mns(str(mns_path), args.resolution)
     log.info("Grille MNS: %d×%d cellules (résolution %.2f m)", grid.shape[0], grid.shape[1], args.resolution)
 
+    mns_filename = "mns.png"
+    mns_path = output_dir / mns_filename
+    generate_mns_image(grid, args.resolution, str(mns_path))
+    log.info("Carte MNS sauvegardée: %s", mns_path)
+
     sim_date = datetime.strptime(args.date, "%Y-%m-%d").date()
     heure_debut, heure_fin = args.heures
     hours = list(range(heure_debut, heure_fin + 1))
@@ -430,6 +463,7 @@ def main(argv=None):
         args.longitude,
         html_hours_data,
         chart_filename,
+        mns_filename,
     )
     log.info("Rapport HTML: %s", report_path)
     log.info("✅ Simulation terminée. Résultats dans: %s", output_dir)

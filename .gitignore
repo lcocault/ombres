@@ -13,6 +13,7 @@ venv/
 *.dat
 
 # Generated results
+*.png
 results/cartes/
 results/ombres_par_heure.csv
 results/rapport_ombres.html
